@@ -7,7 +7,7 @@ Read-only tool for exporting Odoo project tasks to local Markdown files.
 - Exports tasks with metadata, descriptions, and attachments
 - Fetch by task ID, tags (AND/OR logic), project, or archived status
 - Converts HTML descriptions to Markdown
-- Extracts embedded base64 images from descriptions
+- Extracts embedded images from descriptions (saved to files or embedded as base64 data URIs)
 - Downloads task attachments via RPC
 - Config file support for credentials
 - Enforced read-only operations (method whitelist)
@@ -46,6 +46,9 @@ python odoo_ticket_fetcher.py --project "Support" --include-archived
 # Fetch all tasks with limit
 python odoo_ticket_fetcher.py --all --limit 100
 
+# Embed description images directly in the Markdown (self-contained)
+python odoo_ticket_fetcher.py --ids 12345 --embed-images
+
 # Dry run (preview without downloading)
 python odoo_ticket_fetcher.py --tags "Bug" --dry-run
 ```
@@ -76,11 +79,14 @@ odoo_tickets/
 ├── 12345/
 │   ├── task.md
 │   └── files/
-│       ├── embedded_1.png
+│       ├── embedded_1.png    # (omitted with --embed-images)
 │       └── document.pdf
 └── 12346/
     └── ...
 ```
+
+With `--embed-images`, description images are base64-encoded directly into `task.md`
+instead of saved as separate files. Task-level attachments still go to `files/`.
 
 ## License
 

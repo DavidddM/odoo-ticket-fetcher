@@ -634,7 +634,8 @@ class TaskExporter:
         self,
         html_content: str,
         files_dir: Path,
-        image_counter: list[int]
+        image_counter: list[int],
+        embed_images: bool = False
     ) -> str:
         """
         Extract images from HTML, save to disk, return modified HTML.
@@ -655,18 +656,26 @@ class TaskExporter:
         def save_base64_image(match: re.Match) -> str:
             image_type = match.group(1).lower()
             image_data = match.group(2)
-            
+
+            if embed_images:
+                return (
+                    f"\n\n![embedded image]"
+                    f"(data:image/{image_type};base64,{image_data})\n\n"
+                )
+
             if image_type == "jpeg":
                 image_type = "jpg"
-            
+
             image_counter[0] += 1
             filename = f"embedded_{image_counter[0]}.{image_type}"
-            
+
             try:
                 files_dir.mkdir(parents=True, exist_ok=True)
-                (files_dir / filename).write_bytes(base64.b64decode(image_data))
+                (files_dir / filename).write_bytes(
+                    base64.b64decode(image_data)
+                )
                 log.debug("Saved embedded image: %s", filename)
-                return f"![{filename}](files/{filename})"
+                return f"\n\n![{filename}](files/{filename})\n\n"
             except Exception as e:
                 log.warning("Failed to decode embedded image: %s", e)
                 return match.group(0)
@@ -675,21 +684,40 @@ class TaskExporter:
         
         def save_odoo_attachment(match: re.Match) -> str:
             attachment_id = int(match.group(1))
-            
+
             try:
                 att = self.fetch_attachment_by_id(attachment_id)
                 if att and att.get("datas"):
-                    ext = self.get_extension(att.get("mimetype", ""), att.get("name", ""))
+                    if embed_images:
+                        mimetype = att.get("mimetype", "image/png")
+                        name = att.get("name", f"image_{attachment_id}")
+                        return (
+                            f"\n\n![{name}]"
+                            f"(data:{mimetype};base64,{att['datas']})\n\n"
+                        )
+
+                    ext = self.get_extension(
+                        att.get("mimetype", ""),
+                        att.get("name", ""),
+                    )
                     filename = f"attachment_{attachment_id}{ext}"
-                    
+
                     files_dir.mkdir(parents=True, exist_ok=True)
-                    (files_dir / filename).write_bytes(base64.b64decode(att["datas"]))
-                    
+                    (files_dir / filename).write_bytes(
+                        base64.b64decode(att["datas"])
+                    )
+
                     log.debug("Saved attachment image: %s", filename)
-                    return f"![{att.get('name', filename)}](files/{filename})"
+                    return (
+                        f"\n\n![{att.get('name', filename)}]"
+                        f"(files/{filename})\n\n"
+                    )
             except Exception as e:
-                log.warning("Failed to fetch attachment %d: %s", attachment_id, e)
-            
+                log.warning(
+                    "Failed to fetch attachment %d: %s",
+                    attachment_id, e,
+                )
+
             return match.group(0)
         
         result = ODOO_IMAGE_PATTERN.sub(save_odoo_attachment, result)
@@ -705,7 +733,8 @@ class TaskExporter:
         task: dict,
         output_dir: Path,
         attachments: list[dict],
-        keep_raw_html: bool = False
+        keep_raw_html: bool = False,
+        embed_images: bool = False
     ) -> None:
         """
         Export a single task to a folder.
@@ -730,7 +759,8 @@ class TaskExporter:
         raw_description = task.get("description") or ""
         image_counter = [0]
         processed_description = self.extract_and_save_images(
-            raw_description, files_dir, image_counter
+            raw_description, files_dir, image_counter,
+            embed_images=embed_images,
         )
         
         saved_files = []
@@ -797,7 +827,8 @@ class TaskExporter:
         self,
         tasks: list[dict],
         output_dir: Path,
-        keep_raw_html: bool = False
+        keep_raw_html: bool = False,
+        embed_images: bool = False
     ) -> None:
         """
         Export multiple tasks with batched operations.
@@ -824,7 +855,8 @@ class TaskExporter:
                 task,
                 output_dir,
                 attachments_by_task.get(task["id"], []),
-                keep_raw_html=keep_raw_html
+                keep_raw_html=keep_raw_html,
+                embed_images=embed_images,
             )
 
 
@@ -888,6 +920,9 @@ Config file (~/.config/odoo_tickets.toml):
                      help="Output directory")
     out.add_argument("--raw-html", action="store_true",
                      help="Also save raw HTML")
+    out.add_argument("--embed-images", action="store_true",
+                     help="Embed description images as base64 data URIs "
+                          "directly in the Markdown file")
     out.add_argument("--dry-run", action="store_true",
                      help="List tasks without exporting")
     
@@ -1013,7 +1048,11 @@ def main() -> int:
             return 0
         
         output_dir = Path(args.output)
-        exporter.export_all(tasks, output_dir, keep_raw_html=args.raw_html)
+        exporter.export_all(
+            tasks, output_dir,
+            keep_raw_html=args.raw_html,
+            embed_images=args.embed_images,
+        )
         
         log.info("=" * 60)
         log.info("Exported %d task(s) to: %s", len(tasks), output_dir.resolve())
